@@ -7,6 +7,7 @@ Created on Tue Apr 27 09:35:34 2021
 """
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 import rasterio as rs
 from rasterio.plot import show
@@ -23,8 +24,19 @@ crs = {'ACD': 'EPSG:32650',
  'S2': 'EPSG:4326',
  'NICFI': 'EPSG:3857'}
 
+offsets = {'ACD': 5,
+ 'L8': 5,
+ 'S2': 15}
+
 from rasterio.windows import Window
 from rasterio.warp import calculate_default_transform, reproject, Resampling
+
+def read_tiff(file_name):
+    return rs.open(r'{}'.format(file_name))
+
+def plot_tiff(file_name):
+    img = rs.open(r'{}'.format(file_name))
+    show(img)
 
 def transform_img(src_path, dst_path, dst_crs = crs['ACD']):
     with rs.open(src_path) as src:
@@ -64,72 +76,85 @@ def merge_tiff(src_files_to_mosaic):
     mos, out_trans = merge(src_files_to_mosaic)
     return mos, out_trans
 
-def s2_patch():
-    ul_x, lr_y, lr_x, ul_y = transform_bounds('EPSG:32650', 'EPSG:4326', 421755.0, 490365.0, 571755.0, 640365.0)
-    # ul_x, lr_y, lr_x, ul_y = (116.2932643058128, 4.436060081760799, 117.64811844399668, 5.793384413140727)
+
+def ACD_patch(plot = False, save = False):
+    ACD = read_tiff('GAO_ACD_30m_unmasked.tif')
+    ACD_patch = ACD.read()[0, 6000:6000+5000, 5000:5000+5000]
+    if plot : 
+        plt.imshow(ACD_patch)
+    if save:
+        assert(ACD_patch.shape == (5000, 5000))
+        np.save('ACD_patch.npy', ACD_patch)
+    return ACD_patch
+ 
+def ACD_geo_bounds():
+    ACD = read_tiff('GAO_ACD_30m_unmasked.tif')
+    ul_x, ul_y = ACD.xy(6000, 5000, offset='ul')
+    lr_x, lr_y = ACD.xy(6000+5000, 5000+5000, offset='ul')
+    return ul_x, lr_y, lr_x, ul_y # 421740.0, 490380.0, 571740.0, 640380.0
+    
+def s2_patch(plot = False, save = False):
+    ul_i, lr_j, lr_i, ul_j = ACD_geo_bounds()
+    ul_x, lr_y, lr_x, ul_y = transform_bounds('EPSG:32650', 'EPSG:4326', ul_i, lr_j, lr_i, ul_j)
     with rs.open('Sabah_median_patch1_2016.tif') as s2 :
         row_start, col_start = s2.index(ul_x, ul_y)
-        row_stop, col_stop = s2.index(lr_x, lr_y)
-        print(row_start, col_start, row_stop, col_stop)
+        row_stop, col_stop = row_start + 15000, col_start + 15000
         window = Window.from_slices((row_start, row_stop),(col_start, col_stop))
-        s2_window = s2.read([1,2,3],window=window)
+        s2_window = s2.read([1,2,3,4], window = window)
+        if plot : 
+            plt.imshow(s2.read(1, window = window))
+        if save : 
+            assert(s2_window.shape == (4, 15000, 15000))
+            np.save('S2_patch.npy', s2_window)
     return s2_window
 
-def ACD_patch(fn):
-    ACD = read_tiff('GAO_ACD_30m_unmasked.tif')
-    ACD_patch = ACD.read()[6000:6000+5000, 5000:5000+5000]
-    count, dtype, crs, transform = ACD.count, ACD.dtype[0], ACD.crs, ACD.transform
-    write_to_tiff(ACD_patch, fn, count, dtype, crs, transform)
- 
+def l8_patch(plot = False, save = False):
+    ul_i, lr_j, lr_i, ul_j = ACD_geo_bounds()
+    ul_x, lr_y, lr_x, ul_y = transform_bounds('EPSG:32650', 'EPSG:4326', ul_i, lr_j, lr_i, ul_j)
+    with rs.open('l8_sabah.tif') as l8 :
+        row_start, col_start = l8.index(ul_x, ul_y)
+        row_stop, col_stop = row_start + 5000, col_start + 5000
+        window = Window.from_slices((row_start, row_stop),(col_start, col_stop))
+        l8_window = l8.read([1,2,3,4], window = window)
+        if plot : 
+            plt.imshow(l8.read(1, window = window))
+        if save : 
+            assert(l8_window.shape == (4, 5000, 5000))
+            np.save('L8_patch.npy', l8_window)
+    return l8_window
+
+
+def generate_windows(img_fn):
+    img = np.load(img_fn)
+    img_type = img_fn.split('_')[0]
     
-def ACD_geo_bounds(ACD):
-    ul_x, ul_y = ACD.xy(6000, 5000)
-    lr_x, lr_y = ACD.xy(6000+5000, 5000+5000)
-    return ul_x, lr_y, lr_x, ul_y
-    # 421755.0, 490365.0, 571755.0, 640365.0
-
-def read_tiff(file_name):
-    return rs.open(r'{}'.format(file_name))
-
-def plot_tiff(file_name):
-    img = rs.open(r'{}'.format(file_name))
-    show(img)
-
-# en fait, mauvaise idee pcq Windows trop petites
-def generate_windows(img, X = 5, Y = 5):
-    """
-        Returns the Window(left, bottom, right, up) of every X x Y windows in 
-        the image, where the ACD is defined. 
-        
-        -- img : the ACD image
-        -- X : width of the windows, default = 5
-        -- Y : height of the windows, default = 5
-    """
-    ll_x, ll_y, ur_x, ur_y = img.bounds
+    offset = offsets[img_type]
+    
+    if len(img.shape) == 2 : 
+        s1, s2 = img.shape[0], img.shape[1]
+        img = img.reshape((1, s1, s2))
+    
+    x_bound, y_bound = img.shape[1], img.shape[2]
+    print(x_bound, y_bound)
+    
     res = []
     
-    left = ll_x
-    bottom = ll_y
-    right = ll_x + X
-    top = ll_y + Y
+    x_start, y_start = 0, 0
+    x_stop, y_stop = x_start + offset, y_start + offset
     
-    while right <= ur_x and top <= ur_y : 
+    while x_stop <= x_bound and y_stop <= y_bound : 
         
-        left = right
-        right = right + X
+        res.append(img[:, x_start:x_stop, y_start:y_stop])
         
-        bottom = top
-        top = top + Y
-
-        res.append(Window(left, bottom, right, top))
+        x_start = x_stop
+        x_stop = x_stop + offset
+        y_start = y_stop
+        y_stop = y_stop + offset
     
-    return res
+    assert(len(res) == 1000)
+    return np.array(res)
 
 
-
-# can open big Sentinel-2 image if only read window by window: 
-# with rs.open('Sabah_median_2016-0000000000-0000032768.tif') as s2 :
-#     s2_w1 = s2.read(1, window=Window(0,0,512,256))
 
 
 # methods to call on the image :
