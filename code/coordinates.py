@@ -19,6 +19,26 @@ def get_crs():
         crs[img_type] = str(img.crs)
     return crs
 
+def normalize(array):
+    array_min, array_max = np.nanmin(array), np.nanmax(array)
+    return (array - array_min) / (array_max - array_min)
+
+def replace_nan(arr):
+    col_mean = np.nanmean(arr, axis=0)
+    inds = np.where(np.isnan(arr))
+    out_arr = arr.copy()
+    out_arr[inds] = np.take(col_mean, inds[1])
+    return out_arr
+
+def pre_processing(arr):
+    if len(arr.shape) == 2 :
+        return replace_nan(normalize(arr))
+    else:
+        res = np.empty(arr.shape)
+        for i in range(arr.shape[0]):
+            res[i,] = replace_nan(normalize(arr[i,]))
+        return res
+
 crs = {'ACD': 'EPSG:32650',
  'L8': 'EPSG:4326',
  'S2': 'EPSG:4326',
@@ -29,7 +49,7 @@ offsets = {'ACD': 5,
  'S2': 15}
 
 from rasterio.windows import Window
-from rasterio.warp import calculate_default_transform, reproject, Resampling
+from rasterio.warp import calculate_default_transform, reproject
 
 def read_tiff(file_name):
     return rs.open(r'{}'.format(file_name))
@@ -72,14 +92,26 @@ def write_to_tiff(array, fn, count, dtype, crs, transform):
     new_dataset.write(array)
     new_dataset.close()
 
-def merge_tiff(src_files_to_mosaic):
-    mos, out_trans = merge(src_files_to_mosaic)
+def merge_tiff(src_files_to_mosaic, bands, out_file):
+    mos, out_trans = merge(src_files_to_mosaic, indexes = bands, dst_path = out_file)
     return mos, out_trans
 
+from os import listdir
+from rasterio.enums import Resampling
+
+# that doesnt work at all, i had to use gdal_merge.py for some reason
+def merge_quads():
+    to_merge = listdir('quads/')
+    to_merge.remove('.DS_Store')
+    quads_list = []
+    for quad in to_merge :
+        quads_list.append('quads/'+quad)
+    merge(quads_list, res = (5,5), indexes = [1,2,3,4], dst_path = 'merged_quads.tiff', resampling = Resampling.bilinear)
 
 def ACD_patch(plot = False, save = False):
     ACD = read_tiff('GAO_ACD_30m_unmasked.tif')
     ACD_patch = ACD.read()[0, 6000:6000+5000, 5000:5000+5000]
+    ACD_patch = pre_processing(ACD_patch)
     if plot : 
         plt.imshow(ACD_patch)
     if save:
@@ -101,6 +133,7 @@ def s2_patch(plot = False, save = False):
         row_stop, col_stop = row_start + 15000, col_start + 15000
         window = Window.from_slices((row_start, row_stop),(col_start, col_stop))
         s2_window = s2.read([1,2,3,4], window = window)
+        s2_window = pre_processing(s2_window)
         if plot : 
             plt.imshow(s2.read(1, window = window))
         if save : 
@@ -116,6 +149,7 @@ def l8_patch(plot = False, save = False):
         row_stop, col_stop = row_start + 5000, col_start + 5000
         window = Window.from_slices((row_start, row_stop),(col_start, col_stop))
         l8_window = l8.read([1,2,3,4], window = window)
+        l8_window = pre_processing(l8_window)
         if plot : 
             plt.imshow(l8.read(1, window = window))
         if save : 
@@ -123,6 +157,53 @@ def l8_patch(plot = False, save = False):
             np.save('L8_patch.npy', l8_window)
     return l8_window
 
+
+
+def resample_NICFI():
+    with rs.open('merged_quads.tiff') as quads :
+        scaling_factor = 5 / quads.res[0]
+        out_height, out_width = int(quads.height / scaling_factor), int(quads.width / scaling_factor)
+        
+        data = quads.read(indexes = [1,2,3,4],
+            out_shape = (4, out_height, out_width),
+            resampling = Resampling.bilinear)
+        
+        # scale image transform
+        transform = quads.transform * quads.transform.scale(
+            (quads.width / data.shape[-1]),
+            (quads.height / data.shape[-2]))
+        
+        new_dataset = rs.open('downsampled_quads.tiff', 'w', driver='GTiff', height=out_height, 
+                              width=out_width, count=4, dtype='uint16', crs='EPSG:3857', transform=transform)
+        new_dataset.write(data)
+        new_dataset.close()
+    
+
+def NICFI_patch(bands = [1,2,3,4], plot = False, save = False):
+    ul_i, lr_j, lr_i, ul_j = ACD_geo_bounds()
+    ul_x, lr_y, lr_x, ul_y = transform_bounds('EPSG:32650', 'EPSG:3857', ul_i, lr_j, lr_i, ul_j)
+    with rs.open('quads/gdal_quads.tiff') as quads :
+        row_start, col_start = quads.index(ul_x, ul_y)
+        row_stop, col_stop = row_start + 30000, col_start + 30000
+        window = Window.from_slices((row_start, row_stop),(col_start, col_stop))
+        quads_window = quads.read(bands, window = window)
+        print('post reading')
+        quads_window = pre_processing(quads_window)
+        print('post processing')
+        
+        fn = '_'.join(str(x) for x in bands)
+        new_dataset = rs.open('NICFI_patch_bands_{}.tiff'.format(fn), 'w', driver='GTiff', height=30000, 
+                              width=30000, count=len(bands), dtype='float64', crs='EPSG:3857', transform=quads.transform)
+        new_dataset.write(quads_window)
+        new_dataset.close()
+        print('.tiff written')
+        
+        if plot : 
+            plt.imshow(quads.read(bands[0], window = window))
+        if save : 
+            assert(quads_window.shape == (len(bands), 30000, 30000))
+            np.save('NICFI_patch_bands_{}.npy'.format(fn), quads_window)
+    return quads_window
 
 def generate_windows(img_fn):
     img = np.load(img_fn)
@@ -139,19 +220,23 @@ def generate_windows(img_fn):
     
     res = []
     
-    x_start, y_start = 0, 0
-    x_stop, y_stop = x_start + offset, y_start + offset
+    x_start = 0
+    x_stop = x_start + offset
     
-    while x_stop <= x_bound and y_stop <= y_bound : 
+    while x_stop <= x_bound :
+        y_start = 0
+        y_stop = y_start + offset
         
-        res.append(img[:, x_start:x_stop, y_start:y_stop])
-        
+        while y_stop <= y_bound : 
+            res.append(img[:, x_start:x_stop, y_start:y_stop])
+            
+            y_start = y_stop
+            y_stop = y_stop + offset
+            
         x_start = x_stop
         x_stop = x_stop + offset
-        y_start = y_stop
-        y_stop = y_stop + offset
     
-    assert(len(res) == 1000)
+    assert(len(res) == x_bound * y_bound)
     return np.array(res)
 
 
@@ -193,6 +278,22 @@ def generate_windows(img_fn):
 #   band1[row, col] --> some value
 # To get the spatial coordinates of a pixel
 #   dataset.xy(dataset.height // 2, dataset.width // 2) --> (476550.0, 4149150.0) 
+
+def normalize_quad(array, _min, _max):
+    return (array - _min) / (_max - _min)
+
+def quad_info(quad, bands = [1,2,3,4]):
+    ranges = [(0, 3000),(0, 3000),(0, 3000),(0, 5000)]
+    for i in bands:
+        # R, G, B bands
+        band = quad.read(i)
+        print(np.min(band))
+        print(np.max(band))
+        _min, _max = ranges[i - 1]
+        #norm_band = normalize_quad(band, _min, _max)
+        norm_band = normalize(band)
+        plt.imshow(norm_band)
+        plt.show()
 
 
 
