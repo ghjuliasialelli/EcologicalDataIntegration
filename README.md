@@ -11,5 +11,5 @@ This semester project aims to develop a theoretical framework for ecological dat
 The semester project will entail a literature review of current state-of-the-art data integration, a mid-term presentation on the experimental setup, and, lastly, a semester project report summarizing the findings.
 
 ### Repository Structure : 
-- `literature/` : PDFs of papers studied during the Literature Review phase
-- `code/` : folder for the coding phase
+- `Literature/` : PDFs of papers studied during the Literature Review phase
+- `code/` : folder for the coding phase. Further description within the folder itself.
