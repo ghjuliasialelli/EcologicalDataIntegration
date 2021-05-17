@@ -1,5 +1,6 @@
 # FS21 Semester Project
 Supervised by the great [David Dao](https://daviddao.org/#)
+
 Kudos to [Charlotte Bunne](https://www.bunne.ch/) and [Leonie Hodel](https://epl.ethz.ch/people/person-detail.MTg4NzE3.TGlzdC8zNDQwLDEwMTA3MDI4Mg==.html) for their input
 
 ### Task Description : A Comprehensive Analysis for Ecological Data integration using Mixed-Resolution Imagery
