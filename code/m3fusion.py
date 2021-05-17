@@ -11,35 +11,30 @@ Ref:
     - https://github.com/kkgadiraju/M3Fusion/blob/main/train.py
     - https://gdal.org/programs/gdal_merge.html
     
+Packages : 
+    python==3.7.10
+    tensorflow==2.4.1
+    numpy==1.19.5
+    rasterio==1.2.2
+    
+Commands for Leohnard cluster execution : 
+    module load python/3.7.10 tensorflow/2.4.1 numpy/1.19.5 rasterio/1.2.2 pickle
+    bsub -W 1:00 -R "rusage[ngpus_excl_p=1]" python3 m3fusion.py -bs 128 -ns 1.0 -ep 100 -lr 0.0001 -s2 0.3 -l8 0.3 -ni 0.3
 """
 
-import tensorflow as tf
-from tensorflow.keras.layers import Input, GRU, TimeDistributed, Dense, Permute, Dot, Lambda, Conv2D, BatchNormalization, MaxPool2D, Concatenate
+from tensorflow.keras.layers import Input, Dense, Conv2D, BatchNormalization, MaxPool2D, Concatenate
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.models import Model
 from data_gen import DataGenerator
+import pickle
+import argparse
+from os.path import isdir
+from os import mkdir
 
+######################################################################################################
+#  CNN component
+######################################################################################################
 
-"""
-    RNN component : UNUSED
-"""
-rnn_input = Input(batch_shape = (None, 16, 1), name = 'rnn_input')
-def build_rnn_model(rnn_input):
-    gru_sq = GRU(units = 1024, return_sequences = True, name = 'GRU')(rnn_input)
-    v_a = TimeDistributed(Dense(units = 1024, activation = 'tanh', name = 'v_a'))(gru_sq)
-    lambda_a = TimeDistributed(Dense(units = 1, activation = 'softmax', name = 'lambda_a'))(v_a)
-    lambda_a_reshape = Permute(dims = (2,1))(lambda_a)
-    rnn_dot = Dot(axes = (2, 1))([lambda_a_reshape, gru_sq])
-    rnn_feat = Lambda(lambda y: tf.squeeze(y, axis = 1))(rnn_dot)
-    rnn_preds = Dense(units = 1, activation = 'linear', name = 'rnn_preds')(rnn_feat)
-    return rnn_feat, rnn_preds
-rnn_feat, rnn_preds = build_rnn_model(rnn_input)
-
-
-
-"""
-    CNN component
-"""
 def convolutional_block(input_layer, FILTERS, KERNEL_SIZE, PADDING = 'valid'):
     conv = Conv2D(filters = FILTERS, kernel_size = KERNEL_SIZE, padding = PADDING, activation = 'relu')(input_layer)
     bn = BatchNormalization(axis = -1)(conv)
@@ -78,14 +73,30 @@ def build_5x5_cnn_model(cnn_input, model_name):
 # TO DO : linear or sigmoid activation function? Since the input is in [0,1]
 # TO DO : need to de-normalize the output no? (will be easy, only ACD)
 
-"""
-    MERGING.
-"""
+######################################################################################################
+# Command line parsing
+# -bs 128 -ns 1.0 -ep 100 -lr 0.0001 -s2 0.3 -l8 0.3 -ni 0.3
+######################################################################################################
+parser = argparse.ArgumentParser()
+parser.add_argument("-bs",  type = int,   help = "batch size",                      default = 128)
+parser.add_argument("-ns",  type = float, help = "% of number of samples to use",   default = 1.0)
+parser.add_argument("-ep",  type = int,   help = "epochs",                          default = 100)
+parser.add_argument("-lr",  type = float, help = "learning reate",                  default = 0.0001)
+parser.add_argument("-s2",  type = float, help = "s2 weight",                       default = 0.3)
+parser.add_argument("-l8",  type = float, help = "l8 weight",                       default = 0.3)
+parser.add_argument("-ni",  type = float, help = "nicfi weight",                    default = 0.3)
+args = parser.parse_args()
 
-LEARNING_RATE = 0.0001
-WEIGHTS = [0.3, 0.3, 0.3, 1] 
-BS = 10
-EPOCHS = 100
+LEARNING_RATE = args.lr
+WEIGHTS = [args.s2, args.l8, args.ni, 1] 
+BS = args.bs
+EPOCHS = args.ep
+NUM_SAMPLES = args.ns * 1000000
+
+
+######################################################################################################
+# Model building
+######################################################################################################
 
 l8_input = Input(batch_shape = (BS, 5, 5, 4), name = 'l8_input')
 l8_feat, l8_preds = build_5x5_cnn_model(l8_input, 'l8')
@@ -107,7 +118,13 @@ model = Model(inputs = model_inputs, outputs = model_outputs)
 model.summary()
 
 model.compile(loss = model_losses, optimizer = Adam(lr = LEARNING_RATE), loss_weights = WEIGHTS)
-train_data = DataGenerator(num_samples = 1000, batch_size = BS)
-history = model.fit(train_data, batch_size = BS, epochs = 2, verbose = 1) 
-# WARNING:tensorflow:Gradients do not exist for variables ['concat_preds/kernel:0', 'concat_preds/bias:0'] when minimizing the loss.
+train_data = DataGenerator(num_samples = NUM_SAMPLES, batch_size = BS)
+history = model.fit(train_data, batch_size = BS, epochs = EPOCHS, verbose = 1) 
+
+# Construct experiment name
+if not isdir('experiments'): mkdir('experiments')
+fn = '-'.join(list(map(lambda x: ':'.join([x[0], str(x[1])]), list(args.dict.items()))))
+f = open('experiments/{}.pkl'.format(fn), 'wb')
+pickle.dump(history.history, f)
+f.close()
 
