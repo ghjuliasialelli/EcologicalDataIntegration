@@ -11,15 +11,18 @@ Ref:
     - https://github.com/kkgadiraju/M3Fusion/blob/main/train.py
     - https://gdal.org/programs/gdal_merge.html
     
-Packages : 
+Main packages : 
     python==3.7.10
     tensorflow==2.4.1
     numpy==1.19.5
     rasterio==1.2.2
     
 Commands for Leohnard cluster execution : 
-    module load python/3.7.10 tensorflow/2.4.1 numpy/1.19.5 rasterio/1.2.2 pickle
-    bsub -W 1:00 -R "rusage[ngpus_excl_p=1]" python3 m3fusion.py -bs 128 -ns 1.0 -ep 100 -lr 0.0001 -s2 0.3 -l8 0.3 -ni 0.3
+    source $HOME/miniconda3/bin/activate
+    conda create -n semproj python=3.7.10
+    conda activate semproj
+    pip3 install -r requirements.txt
+    bsub -W 1:00 -R "rusage[ngpus_excl_p=1]" -R "rusage[mem=2048]" -R "rusage[scratch=5000]" python3 m3fusion.py -bs 128 -ns 1.0 -ep 100 -lr 0.0001 -s2 0.3 -l8 0.3 -ni 0.3
 """
 
 from tensorflow.keras.layers import Input, Dense, Conv2D, BatchNormalization, MaxPool2D, Concatenate
@@ -91,7 +94,7 @@ LEARNING_RATE = args.lr
 WEIGHTS = [args.s2, args.l8, args.ni, 1] 
 BS = args.bs
 EPOCHS = args.ep
-NUM_SAMPLES = args.ns * 1000000
+NUM_SAMPLES = int(args.ns * 1000000)
 
 
 ######################################################################################################
