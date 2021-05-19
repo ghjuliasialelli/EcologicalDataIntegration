@@ -18,11 +18,15 @@ Main packages :
     rasterio==1.2.2
     
 Commands for Leohnard cluster execution : 
-    source $HOME/miniconda3/bin/activate
-    conda create -n semproj python=3.7.10
+    [*] source $HOME/miniconda3/bin/activate
+    [*] conda create -n semproj python=3.7.10
     conda activate semproj
-    pip3 install -r requirements.txt
+    [*] conda install cudatoolkit
+    [*] pip3 install -r requirements.txt
     bsub -W 1:00 -R "rusage[ngpus_excl_p=1]" -R "rusage[mem=2048]" -R "rusage[scratch=5000]" python3 m3fusion.py -bs 128 -ns 1.0 -ep 100 -lr 0.0001 -s2 0.3 -l8 0.3 -ni 0.3
+
+
+    [*]  indicates that it only needs to be done once
 """
 
 from tensorflow.keras.layers import Input, Dense, Conv2D, BatchNormalization, MaxPool2D, Concatenate
@@ -90,12 +94,18 @@ parser.add_argument("-l8",  type = float, help = "l8 weight",                   
 parser.add_argument("-ni",  type = float, help = "nicfi weight",                    default = 0.3)
 args = parser.parse_args()
 
-LEARNING_RATE = args.lr
-WEIGHTS = [args.s2, args.l8, args.ni, 1] 
-BS = args.bs
-EPOCHS = args.ep
-NUM_SAMPLES = int(args.ns * 1000000)
+#LEARNING_RATE = args.lr
+#WEIGHTS = [args.s2, args.l8, args.ni, 1] 
+#BS = args.bs
+#EPOCHS = args.ep
+#NUM_SAMPLES = int(args.ns * 1000000)
 
+
+LEARNING_RATE = 0.01
+WEIGHTS = [0.3, 0.3, 0.3, 1] 
+BS = 1024
+EPOCHS = 5
+NUM_SAMPLES = int(0.33 * 1000000)
 
 ######################################################################################################
 # Model building
