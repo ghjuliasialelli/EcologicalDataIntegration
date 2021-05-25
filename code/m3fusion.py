@@ -10,6 +10,7 @@ M3Fusion (tf) implementation attempt
 Ref:
     - https://github.com/kkgadiraju/M3Fusion/blob/main/train.py
     - https://gdal.org/programs/gdal_merge.html
+    - https://www.tensorflow.org/tensorboard/get_started
     
 Main packages : 
     python==3.7.10
@@ -37,6 +38,9 @@ import pickle
 import argparse
 from os.path import isdir
 from os import mkdir
+from tensorflow.keras.callbacks import TensorBoard
+from sklearn.model_selection import train_test_split
+import numpy as np
 
 ######################################################################################################
 #  CNN component
@@ -77,7 +81,6 @@ def build_5x5_cnn_model(cnn_input, model_name):
     cnn_preds = Dense(1, activation = 'linear', name = model_name+'_preds')(cnn_feat)
     return cnn_feat, cnn_preds
 
-# TO DO : linear or sigmoid activation function? Since the input is in [0,1]
 # TO DO : need to de-normalize the output no? (will be easy, only ACD)
 
 ######################################################################################################
@@ -85,27 +88,21 @@ def build_5x5_cnn_model(cnn_input, model_name):
 # -bs 128 -ns 1.0 -ep 100 -lr 0.0001 -s2 0.3 -l8 0.3 -ni 0.3
 ######################################################################################################
 parser = argparse.ArgumentParser()
-parser.add_argument("-bs",  type = int,   help = "batch size",                      default = 128)
+parser.add_argument("-bs",  type = int,   help = "batch size",                      default = 2048)
 parser.add_argument("-ns",  type = float, help = "% of number of samples to use",   default = 1.0)
-parser.add_argument("-ep",  type = int,   help = "epochs",                          default = 100)
-parser.add_argument("-lr",  type = float, help = "learning reate",                  default = 0.0001)
+parser.add_argument("-ep",  type = int,   help = "epochs",                          default = 5)
+parser.add_argument("-lr",  type = float, help = "learning reate",                  default = 0.001)
 parser.add_argument("-s2",  type = float, help = "s2 weight",                       default = 0.3)
 parser.add_argument("-l8",  type = float, help = "l8 weight",                       default = 0.3)
 parser.add_argument("-ni",  type = float, help = "nicfi weight",                    default = 0.3)
 args = parser.parse_args()
 
-#LEARNING_RATE = args.lr
-#WEIGHTS = [args.s2, args.l8, args.ni, 1] 
-#BS = args.bs
-#EPOCHS = args.ep
-#NUM_SAMPLES = int(args.ns * 1000000)
-
-
-LEARNING_RATE = 0.01
-WEIGHTS = [0.3, 0.3, 0.3, 1] 
-BS = 1024
-EPOCHS = 5
-NUM_SAMPLES = int(0.33 * 1000000)
+LEARNING_RATE = args.lr
+WEIGHTS = [args.s2, args.l8, args.ni, 1] 
+BS = args.bs
+EPOCHS = args.ep
+NUM_SAMPLES = int(args.ns * 1000000)
+experiment_name = '-'.join(list(map(lambda x: ':'.join([x[0], str(x[1])]), list(args.__dict__.items()))))
 
 ######################################################################################################
 # Model building
@@ -129,15 +126,23 @@ model_losses = {pred:'mse' for pred in ['s2_preds', 'l8_preds', 'nicfi_preds', '
 
 model = Model(inputs = model_inputs, outputs = model_outputs)
 model.summary()
-
 model.compile(loss = model_losses, optimizer = Adam(lr = LEARNING_RATE), loss_weights = WEIGHTS)
-train_data = DataGenerator(num_samples = NUM_SAMPLES, batch_size = BS)
-history = model.fit(train_data, batch_size = BS, epochs = EPOCHS, verbose = 1) 
 
-# Construct experiment name
+def train_val_split(num_samples, batch_size, ratio):
+    indices = np.random.choice(1000000, num_samples, replace = False)
+    train_samples, val_samples = train_test_split(indices, test_size = ratio)
+    
+    train_data = DataGenerator(train_samples, batch_size)
+    val_data = DataGenerator(val_samples, batch_size)
+    
+    return train_data, val_data
+    
+train_data, val_data = train_val_split(NUM_SAMPLES, BS, 0.25)
+history = model.fit(train_data, validation_data = val_data, batch_size = BS, epochs = EPOCHS, 
+                    verbose = 1, callbacks = [TensorBoard(log_dir = 'logs/fit/' + experiment_name)]) 
+
 if not isdir('experiments'): mkdir('experiments')
-fn = '-'.join(list(map(lambda x: ':'.join([x[0], str(x[1])]), list(args.dict.items()))))
-f = open('experiments/{}.pkl'.format(fn), 'wb')
+f = open('experiments/{}.pkl'.format(experiment_name), 'wb')
 pickle.dump(history.history, f)
 f.close()
 
