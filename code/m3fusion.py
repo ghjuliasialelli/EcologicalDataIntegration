@@ -24,7 +24,7 @@ Commands for Leohnard cluster execution :
     conda activate semproj
     [*] conda install cudatoolkit
     [*] pip3 install -r requirements.txt
-    bsub -W 1:00 -R "rusage[ngpus_excl_p=1]" -R "rusage[mem=2048]" -R "rusage[scratch=5000]" python3 m3fusion.py -bs 128 -ns 1.0 -ep 100 -lr 0.0001 -s2 0.3 -l8 0.3 -ni 0.3
+    bsub -W 6:00 -R "rusage[ngpus_excl_p=1,mem=4096,scratch=5000]" python3 m3fusion.py [ARGS]
 
 
     [*]  indicates that it only needs to be done once
