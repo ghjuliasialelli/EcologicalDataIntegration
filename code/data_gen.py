@@ -24,24 +24,24 @@ offsets = {'ACD': 5,
 
 class DataGenerator(Sequence):
 
-    def __init__(self, num_samples=1000000, batch_size=100):
+    def __init__(self, samples, batch_size, shuffle = True):
         """
         Initializes a data generator object
-          :param num_samples: The number of samples used for training.
           :param batch_size: The size of each batch returned by __getitem__
         """
-        self.num_samples = num_samples
+        self.indices = samples
+        self.shuffle = shuffle
         self.batch_size = batch_size
         self.offsets = [5, 5, 15, 30]
         self.shapes = [5000, 5000, 15000, 30000]
         self.on_epoch_end()
 
     def on_epoch_end(self):
-        self.indices = np.random.choice(1000000, self.num_samples, replace = False)
+        if self.shuffle : np.random.shuffle(self.indices)
     
     def __len__(self):
         """ Number of batches. """ 
-        return self.num_samples // self.batch_size
+        return len(self.indices) // self.batch_size
     
     def __getitem__(self, idx):
         """
@@ -72,7 +72,6 @@ class DataGenerator(Sequence):
         
         return (x, y)
 
-# random stuff
     
     
     
